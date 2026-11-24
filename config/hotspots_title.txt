@@ -1,0 +1,11 @@
+# Areas clicaveis da TELA INICIAL, com o botao do DualShock 4 que cada uma representa.
+# Formato:  x  y  largura  altura  botao  Rotulo
+# As coordenadas sao em pixels da janela do JOGO (ex.: 1280x720), nao da TV.
+# Botoes: cross (X), circle (Circulo), square (Quadrado), triangle (Triangulo)
+#
+# ATENCAO: estes valores sao so de exemplo. Quando voce vir a tela inicial real no PS4,
+# me diga onde ficam os botoes do jogo e eu ajusto (ou edite aqui e rode o workflow 1 de novo).
+ 80 560 250 90 cross Jogar
+360 560 250 90 circle Voltar
+640 560 250 90 square Extras
+920 560 250 90 triangle Opcoes

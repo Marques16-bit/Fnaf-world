@@ -1,0 +1,21 @@
+# ---- Arquivos temporarios / gerados ----
+work/
+ps4/build/
+ps4/eboot.bin
+ps4/pkg.gp4
+ps4/*.pkg
+ps4/sce_sys/param.sfo
+ps4/sce_sys/about/
+ps4/sce_module/*.prx
+
+# ---- Conteudo do jogo (protegido por direitos autorais): nunca vai para o Git ----
+ps4/assets/*
+!ps4/assets/.gitkeep
+input/*
+!input/LEIA-ME.txt
+*.exe
+*.dat
+*.ccn
+
+__pycache__/
+*.pyc

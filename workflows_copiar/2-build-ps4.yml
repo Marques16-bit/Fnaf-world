@@ -1,0 +1,165 @@
+name: "2 - Compilar PS4 (PKG)"
+
+# Roda sozinho quando o workflow 1 termina, quando voce muda algo em ps4/ (push),
+# ou manualmente (Actions > "2 - Compilar PS4 (PKG)" > Run workflow).
+# Resultado: artefato "fnafworld-ps4-pkg" com o .pkg e o eboot.bin.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - "ps4/**"
+      - "ci/**"
+      - ".github/workflows/2-build-ps4.yml"
+  workflow_run:
+    workflows: ["1 - Extrair assets (Windows)"]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      TOOLCHAIN_URL: https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain/releases/download/v0.5.4/toolchain-llvm-18.tar.gz
+      DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "1"
+    steps:
+      - name: Baixar o repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar Python (Pillow, NumPy)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias Python
+        run: python -m pip install -r tools/requirements.txt
+
+      - name: Instalar clang 18, lld e make
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang lld make unzip
+          clang --version | head -1
+          ld.lld --version | head -1
+
+      - name: Baixar o OpenOrbis PS4 Toolchain v0.5.4
+        shell: bash
+        run: |
+          mkdir -p "$HOME/oo"
+          curl -fL --retry 3 -o "$HOME/oo/toolchain.tar.gz" "$TOOLCHAIN_URL"
+          sha256sum "$HOME/oo/toolchain.tar.gz"
+          echo "sha256 esperado: 3c7cd5bb593ca74fa1c13fd59f3938dc0fc07985167f7275063019e63abe4526 (so informativo)"
+          tar -xzf "$HOME/oo/toolchain.tar.gz" -C "$HOME/oo"
+          LINKX=$(find "$HOME/oo" -name link.x -print -quit)
+          if [ -z "$LINKX" ]; then echo "ERRO: link.x nao encontrado no toolchain"; find "$HOME/oo" -maxdepth 3 | head -50; exit 1; fi
+          TC=$(dirname "$LINKX")
+          echo "OO_PS4_TOOLCHAIN=$TC" >> "$GITHUB_ENV"
+          echo "Toolchain em: $TC"
+          ls "$TC"
+          ls "$TC/bin/linux" || true
+          chmod +x "$TC"/bin/linux/* 2>/dev/null || true
+
+      - name: Baixar os assets extraidos (artefato do workflow 1)
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ID=$(gh api "repos/${{ github.repository }}/actions/artifacts?name=ps4-assets&per_page=20" --jq '[.artifacts[] | select(.expired==false)][0].id')
+          echo "artefato ps4-assets: $ID"
+          if [ -n "$ID" ] && [ "$ID" != "null" ]; then
+            gh api "repos/${{ github.repository }}/actions/artifacts/$ID/zip" > assets.zip
+            rm -rf ps4/assets/img ps4/assets/frames ps4/assets/manifest.txt
+            unzip -o -q assets.zip -d ps4/assets
+            echo "assets baixados:"; ls ps4/assets
+          else
+            echo "Nenhum artefato ps4-assets ainda. Vai ser usado o modo de teste."
+          fi
+
+      - name: Garantir assets (modo de teste se nao houver)
+        shell: bash
+        run: python tools/pack_assets.py --placeholder --only-if-missing --out ps4/assets --config config
+
+      - name: Preparar modulos do toolchain (libc, libSceFios2, right.sprx)
+        shell: bash
+        run: |
+          mkdir -p ps4/sce_module ps4/sce_sys/about
+          for f in libc.prx libSceFios2.prx; do
+            src=$(find "$OO_PS4_TOOLCHAIN" -name "$f" -print -quit)
+            if [ -n "$src" ]; then cp "$src" ps4/sce_module/ && echo "ok: $f <- $src"; else echo "AVISO: $f nao encontrado no toolchain"; fi
+          done
+          src=$(find "$OO_PS4_TOOLCHAIN" -name right.sprx -print -quit)
+          if [ -n "$src" ]; then cp "$src" ps4/sce_sys/about/ && echo "ok: right.sprx"; else echo "AVISO: right.sprx nao encontrado"; fi
+
+      - name: Testar o PkgTool.Core (usa container com libssl1.1 se precisar)
+        shell: bash
+        run: |
+          PK="$OO_PS4_TOOLCHAIN/bin/linux/PkgTool.Core"
+          if "$PK" sfo_new /tmp/teste.sfo > /tmp/pk.log 2>&1; then
+            echo "PkgTool.Core roda direto no runner."
+            echo "PKGTOOL=$PK" >> "$GITHUB_ENV"
+          else
+            echo "---- saida do PkgTool.Core ----"; cat /tmp/pk.log; echo "-------------------------------"
+            echo "Nao rodou direto. Montando container Ubuntu 20.04 com libssl1.1 ..."
+            docker build -t pkgtool-env -f ci/Dockerfile.pkgtool ci
+            chmod +x ci/pkgtool.sh
+            echo "PKGTOOL=$GITHUB_WORKSPACE/ci/pkgtool.sh" >> "$GITHUB_ENV"
+          fi
+
+      - name: Compilar o eboot.bin
+        shell: bash
+        working-directory: ps4
+        run: |
+          make -j4 eboot.bin 2>&1 | tee ../build_compile.log
+          test -f eboot.bin
+
+      - name: Gerar o PKG
+        shell: bash
+        working-directory: ps4
+        run: |
+          make pkg 2>&1 | tee ../build_pkg.log
+          ls -la *.pkg
+
+      - name: Resumo na pagina do run
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Build do PS4"
+            if ls ps4/*.pkg >/dev/null 2>&1; then
+              echo "PKG gerado: \`$(ls ps4/*.pkg | head -1 | xargs basename)\` ($(du -h ps4/*.pkg | cut -f1))"
+              echo; echo "Baixe o artefato **fnafworld-ps4-pkg** no fim desta pagina."
+            else
+              echo "**Falhou.** Ultimas linhas do log:"
+              echo '```'
+              (tail -n 40 build_pkg.log 2>/dev/null || tail -n 40 build_compile.log 2>/dev/null || echo "sem log")
+              echo '```'
+            fi
+            echo; echo "Manifesto dos assets usado:"; echo '```'; head -n 8 ps4/assets/manifest.txt 2>/dev/null; echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Guardar o PKG
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fnafworld-ps4-pkg
+          path: |
+            ps4/*.pkg
+            ps4/eboot.bin
+          retention-days: 30
+
+      - name: Guardar os logs de build
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-build-ps4
+          path: |
+            build_compile.log
+            build_pkg.log
+          retention-days: 14
+          if-no-files-found: ignore

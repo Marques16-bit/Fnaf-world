@@ -1,0 +1,110 @@
+name: "1 - Extrair assets (Windows)"
+
+# Roda MANUALMENTE: aba Actions > "1 - Extrair assets (Windows)" > Run workflow.
+# Pega o FNaFWorld.exe, extrai as imagens com o CTFAK 2.0 (orquestrado por Python),
+# converte para o formato do PS4 e guarda o resultado como artefato "ps4-assets".
+# Quando termina com sucesso, o workflow "2 - Compilar PS4 (PKG)" roda sozinho.
+
+on:
+  workflow_dispatch:
+    inputs:
+      exe_url:
+        description: "Link DIRETO do FNaFWorld.exe ou .zip (opcional). Vazio = usa a Release com a tag abaixo."
+        required: false
+        default: ""
+      release_tag:
+        description: "Tag da Release que contem o .exe"
+        required: false
+        default: "assets"
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Baixar o repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias Python (Pillow, NumPy)
+        shell: bash
+        run: python -m pip install -r tools/requirements.txt
+
+      - name: Obter o FNaFWorld.exe
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXE_URL: ${{ inputs.exe_url }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: python tools/fetch_input.py --out work/input --url "$EXE_URL" --tag "${RELEASE_TAG:-assets}"
+
+      - name: Diagnostico do .exe (versao/build do Clickteam)
+        continue-on-error: true
+        shell: bash
+        run: python tools/inspect_exe.py work/input/game.exe work/inspect.txt
+
+      - name: Instalar .NET 6
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "6.0.x"
+
+      - name: Instalar .NET 6 Desktop Runtime (garantia)
+        continue-on-error: true
+        shell: pwsh
+        run: choco install dotnet-6.0-desktopruntime -y --no-progress
+
+      - name: Baixar o codigo do CTFAK 2.0
+        uses: actions/checkout@v4
+        with:
+          repository: CTFAK/CTFAK2.0
+          ref: master
+          path: _ctfak
+
+      - name: Compilar o CTFAK 2.0
+        continue-on-error: true
+        shell: bash
+        run: dotnet build _ctfak/CTFAK.sln -c Release --nologo -v minimal 2>&1 | tee work/dotnet_build.log
+
+      - name: Extrair as imagens (Python orquestra o CTFAK)
+        continue-on-error: true
+        shell: bash
+        run: python tools/extract_assets.py --exe work/input/game.exe --ctfak-src _ctfak --work work --dump-out work/dump
+
+      - name: Converter para o formato do PS4
+        shell: bash
+        run: python tools/pack_assets.py --dump work/dump --out ps4/assets --report work/relatorio --config config
+
+      - name: Resumo na pagina do run
+        if: always()
+        shell: bash
+        run: python tools/make_summary.py >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Guardar os assets do PS4
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ps4-assets
+          path: ps4/assets
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Guardar o relatorio (miniaturas, logs)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: relatorio-extracao
+          path: |
+            work/relatorio
+            work/extract_log.txt
+            work/extract_report.json
+            work/inspect.txt
+            work/dotnet_build.log
+          retention-days: 30
+          if-no-files-found: warn

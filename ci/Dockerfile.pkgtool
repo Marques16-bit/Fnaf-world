@@ -1,0 +1,6 @@
+# Ambiente minimo para rodar o PkgTool.Core do OpenOrbis (precisa de libssl 1.1, que o Ubuntu 24.04 nao tem).
+FROM ubuntu:20.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates libssl1.1 libicu66 libstdc++6 zlib1g libgcc-s1 \
+ && rm -rf /var/lib/apt/lists/*

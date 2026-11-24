@@ -1,0 +1,11 @@
+Pasta opcional para o FNaFWorld.exe.
+
+O GitHub so aceita arquivos de ate 25 MB pelo navegador do celular (100 MB por git).
+O FNaF World costuma ser maior que isso, entao o caminho recomendado e a RELEASE:
+
+  1. No repositorio: Releases > "Draft a new release"
+  2. Tag: assets   (exatamente assim, minusculo)
+  3. Anexe o FNaFWorld.exe (ou um .zip com a pasta do jogo) - Releases aceitam ate 2 GB
+  4. Publique (pode ser como "pre-release"). Mantenha o REPOSITORIO PRIVADO.
+
+Depois: Actions > "1 - Extrair assets (Windows)" > Run workflow.
