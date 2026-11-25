@@ -1,57 +1,43 @@
-# Como colocar estes arquivos no seu repositório (pelo celular)
+# Como instalar o projeto no seu repositório (só pelo celular)
 
-O repositório precisa ficar com estes arquivos **na raiz** (`README.md`, `ps4/`, `tools/`, `.github/`...).
-Atenção: a pasta `.github` começa com ponto e alguns gerenciadores de arquivos do celular a escondem.
-Por isso a pasta **`workflows_copiar/`** tem uma cópia visível dos dois workflows.
+O navegador do celular não envia pastas, só arquivos. Por isso o jeito mais simples é enviar **1 arquivo (o zip)**
+e deixar o GitHub Actions extrair tudo na raiz do repositório.
 
-## Opção A — app de Git no celular (mais simples)
+## Passo a passo
 
-- iPhone: **Working Copy** · Android: **MGit** ou **Termux** (`pkg install git`).
-- Descompacte o zip dentro da pasta do repositório clonado, faça commit e push.
+1. **Crie o extrator de ZIP (uma vez só).** No repositório: **Add file → Create new file**.
+   Nome do arquivo: `.github/workflows/0-instalar-zip.yml`
+   Cole o conteúdo do arquivo `0-instalar-zip.yml` (veio junto com o zip, e também está dentro dele em `workflows_copiar/`).
+   Toque em **Commit changes**.
+2. **Envie o zip:** **Add file → Upload files** → escolha `fnafworld-ps4.zip` → **Commit changes**.
+   Fica na **raiz** do repositório (não dentro de pasta).
+3. O workflow **"0 - Instalar ZIP na raiz"** roda sozinho (aba **Actions**), extrai tudo na raiz, apaga o zip e salva.
+   Se não rodar sozinho: Actions → "0 - Instalar ZIP na raiz" → **Run workflow**.
+4. **Passo manual (só se você NÃO fez a "Opção turbo" abaixo):** o GitHub não deixa um workflow criar outros workflows.
+   Então crie a mão estes dois arquivos (Add file → Create new file), colando o conteúdo das cópias que agora estão no repositório:
 
-## Opção B — só pelo navegador (sem app de Git)
+   | Nome do arquivo novo | Cole o conteúdo de |
+   |---|---|
+   | `.github/workflows/1-extract.yml` | `workflows_copiar/1-extract.yml` |
+   | `.github/workflows/2-build-ps4.yml` | `workflows_copiar/2-build-ps4.yml` |
 
-O navegador do celular não envia pastas, só arquivos. Então:
+   Dica: abra o arquivo em `workflows_copiar/`, toque nos 3 pontinhos (⋯) → **Copy raw file**, e cole no arquivo novo.
 
-1. No repositório, **Add file → Create new file**. Nome: `.github/workflows/instalar-zip.yml` e cole:
+Pronto. Siga o **README.md** (Release `assets` com o `FNaFWorld.exe` → rodar os workflows).
 
-```yaml
-name: "0 - Instalar do ZIP"
-on:
-  workflow_dispatch:
-    inputs:
-      zip_path:
-        description: "Nome do zip enviado para a raiz do repositorio"
-        default: "fnafworld-ps4.zip"
-permissions:
-  contents: write
-jobs:
-  install:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Descompactar
-        env:
-          ZIP_PATH: ${{ inputs.zip_path }}
-        run: |
-          unzip -o "$ZIP_PATH" -d _zip
-          rm -rf _zip/.github      # o GITHUB_TOKEN nao pode gravar workflows: voce cria os 2 a mao (passo 4)
-          cp -a _zip/. .
-          rm -rf _zip "$ZIP_PATH"
-      - name: Commit
-        run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git add -A
-          git commit -m "Instala FNaF World PS4 (do zip)" || echo "nada para commitar"
-          git push
-```
+## Opção turbo (opcional): instalar os workflows 1 e 2 automaticamente
 
-2. **Add file → Upload files** e envie o **`fnafworld-ps4.zip`** (é um arquivo só; precisa ter menos de 25 MB).
-3. **Actions → "0 - Instalar do ZIP" → Run workflow.** Os arquivos aparecem na raiz.
-4. Crie **a mão** os dois workflows (Add file → Create new file), colando o conteúdo de:
-   - `workflows_copiar/1-extract.yml`  → nome do arquivo novo: `.github/workflows/1-extract.yml`
-   - `workflows_copiar/2-build-ps4.yml` → nome do arquivo novo: `.github/workflows/2-build-ps4.yml`
-5. Pode apagar `.github/workflows/instalar-zip.yml` depois, e a pasta `workflows_copiar/`.
+Se criar um token de acesso, o passo 4 some e o extrator instala tudo sozinho.
 
-Depois siga o **README.md** (Release `assets` com o `FNaFWorld.exe` → rodar os workflows).
+1. GitHub → foto do perfil → **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**.
+2. **Repository access:** *Only select repositories* → escolha este repositório.
+3. **Permissions → Repository permissions:** *Contents* = **Read and write** e *Workflows* = **Read and write**.
+4. Gere e **copie o token**.
+5. No repositório: **Settings → Secrets and variables → Actions → New repository secret**.
+   Nome: `PAT_TOKEN` · Valor: o token. Salve.
+6. Faça o passo 2 acima (enviar o zip). Agora a pasta `.github/workflows` também é instalada.
+
+## Atualizações futuras
+
+Quando eu mandar um zip novo, é só repetir o **passo 2** (enviar o zip para a raiz). Os arquivos com o mesmo nome são substituídos.
+Seus arquivos que não estão no zip (como a Release `assets` com o `.exe`) não são tocados.

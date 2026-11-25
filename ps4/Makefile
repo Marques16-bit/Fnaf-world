@@ -78,7 +78,7 @@ pkg.gp4: $(PKG_FILES)
 > $(CREATE_GP4) -out $@ --content-id=$(CONTENT_ID) --files "$(PKG_FILES)"
 
 $(CONTENT_ID).pkg: pkg.gp4
-> $(PKGTOOL) pkg_build pkg.gp4 .
+> bash ../ci/build_pkg.sh pkg.gp4 .
 
 clean:
 > rm -rf build eboot.bin pkg.gp4 sce_sys/param.sfo *.pkg

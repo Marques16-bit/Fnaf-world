@@ -1,0 +1,100 @@
+name: "0 - Instalar ZIP na raiz"
+
+# Envie um .zip para a RAIZ do repositorio (Add file > Upload files).
+# Este workflow roda sozinho, extrai o conteudo do zip na raiz, apaga o zip e salva (commit).
+# Tambem pode ser rodado a mao: Actions > "0 - Instalar ZIP na raiz" > Run workflow.
+
+on:
+  push:
+    paths:
+      - "*.zip"
+  workflow_dispatch:
+    inputs:
+      zip_name:
+        description: "Nome do .zip na raiz (vazio = qualquer .zip que estiver na raiz)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  instalar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar o repositorio
+        uses: actions/checkout@v4
+        with:
+          # Com o segredo opcional PAT_TOKEN o GitHub deixa gravar tambem a pasta .github/workflows.
+          token: ${{ secrets.PAT_TOKEN || github.token }}
+
+      - name: Extrair o ZIP para a raiz
+        env:
+          ZIP_NAME: ${{ inputs.zip_name }}
+          HAS_PAT: ${{ secrets.PAT_TOKEN != '' }}
+        run: |
+          set -e
+          shopt -s nullglob dotglob
+          if [ -n "$ZIP_NAME" ]; then
+            if [ ! -f "$ZIP_NAME" ]; then echo "ERRO: $ZIP_NAME nao esta na raiz do repositorio."; exit 1; fi
+            zips=("$ZIP_NAME")
+          else
+            zips=(*.zip)
+          fi
+          if [ ${#zips[@]} -eq 0 ]; then
+            echo "Nenhum .zip na raiz. Nada a fazer."
+            exit 0
+          fi
+          for z in "${zips[@]}"; do
+            echo "=== Extraindo $z ==="
+            rm -rf _zip && mkdir _zip
+            unzip -q -o "$z" -d _zip
+            entries=(_zip/*)
+            if [ ${#entries[@]} -eq 1 ] && [ -d "${entries[0]}" ]; then
+              src="${entries[0]}"      # zip com uma unica pasta no topo: entra nela
+            else
+              src="_zip"
+            fi
+            if [ "$HAS_PAT" != "true" ] && [ -d "$src/.github" ]; then
+              echo "AVISO: sem o segredo PAT_TOKEN o GitHub nao deixa gravar .github/workflows; essa pasta foi pulada."
+              rm -rf "$src/.github"
+            fi
+            cp -a "$src"/. .
+            rm -rf _zip
+            rm -f "$z"
+          done
+          echo "Arquivos na raiz agora:"
+          ls -A
+
+      - name: Salvar no repositorio (commit)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Nada mudou."
+          else
+            git commit -m "Instalar projeto a partir do ZIP"
+            git push
+          fi
+
+      - name: Resumo na pagina do run
+        if: always()
+        env:
+          HAS_PAT: ${{ secrets.PAT_TOKEN != '' }}
+        run: |
+          {
+            echo "## Instalacao do ZIP"
+            echo
+            echo "Os arquivos do zip foram extraidos na raiz do repositorio."
+            if [ "$HAS_PAT" != "true" ]; then
+              echo
+              echo "**Falta 1 passo manual:** o GitHub nao deixa um workflow criar outros workflows sem o segredo PAT_TOKEN."
+              echo "Crie a mao (Add file > Create new file) estes dois arquivos, colando o conteudo das copias em \`workflows_copiar/\`:"
+              echo "- \`.github/workflows/1-extract.yml\`  (copia: workflows_copiar/1-extract.yml)"
+              echo "- \`.github/workflows/2-build-ps4.yml\`  (copia: workflows_copiar/2-build-ps4.yml)"
+            else
+              echo
+              echo "Os workflows 1 e 2 tambem foram instalados (PAT_TOKEN presente)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
