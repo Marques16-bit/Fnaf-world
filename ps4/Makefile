@@ -76,6 +76,7 @@ sce_sys/param.sfo: Makefile
 
 pkg.gp4: $(PKG_FILES)
 > $(CREATE_GP4) -out $@ --content-id=$(CONTENT_ID) --files "$(PKG_FILES)"
+> python3 ../ci/fix_gp4.py $@
 
 $(CONTENT_ID).pkg: pkg.gp4
 > bash ../ci/build_pkg.sh pkg.gp4 .
