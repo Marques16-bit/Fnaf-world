@@ -59,8 +59,39 @@ uint8_t g_pad_raw[512] __attribute__((aligned(16)));
 uint8_t g_flip_status[256] __attribute__((aligned(16)));
 int g_pad_retry = 0;
 bool g_log_ready = false;
+uint64_t g_flip_base = 0;     // contador de flips ao abrir o video
+uint64_t g_submitted = 0;     // flips enviados por nos
+bool g_flip_poll_ok = true;   // false = o contador nao se comportou; usa tempo fixo
+int g_present_calls = 0;
 
 size_t round_up(size_t v, size_t a) { return (v + a - 1) / a * a; }
+
+// Le o contador de flips concluidos (primeiro campo de SceVideoOutFlipStatus).
+bool read_flip_count(uint64_t* out) {
+    memset(g_flip_status, 0, sizeof(g_flip_status));
+    if (sceVideoOutGetFlipStatus(g_video, g_flip_status) != 0) return false;
+    memcpy(out, g_flip_status, 8);
+    return true;
+}
+
+// Espera o ultimo flip enviado ser EXIBIDO. So depois disso o buffer antigo pode ser redesenhado
+// sem aparecer na tela (era isso que fazia o overlay "piscar").
+void wait_flip_done() {
+    if (g_flip_poll_ok) {
+        for (int i = 0; i < 200; ++i) {
+            uint64_t c = 0;
+            if (!read_flip_count(&c)) break;
+            if (c >= g_flip_base + g_submitted) {
+                if (g_present_calls < 4) plat::log("[ps4] flip %d concluido (contador=%d base=%d)", g_present_calls, (int)c, (int)g_flip_base);
+                return;
+            }
+            sceKernelUsleep(500);
+        }
+        plat::log("[ps4] contador de flips nao avancou; usando espera fixa de 14 ms");
+        g_flip_poll_ok = false;
+    }
+    sceKernelUsleep(14000);
+}
 
 // Aloca memoria direta mapeada na CPU. Tenta o tipo pedido e o alternativo.
 void* map_direct(size_t bytes, int prot, int type_first, int type_second) {
@@ -154,9 +185,15 @@ bool init(int width, int height) {
     if (r != 0) return false;
     sceVideoOutSetFlipRate(g_video, 0);
 
+    uint64_t base = 0;
+    if (read_flip_count(&base)) g_flip_base = base;
+    else g_flip_poll_ok = false;
+    log("[ps4] contador de flips inicial = %d (poll %s)", (int)g_flip_base, g_flip_poll_ok ? "ok" : "indisponivel");
+
     // primeiro quadro (preto) para a tela acordar
     g_cur = 0;
-    sceVideoOutSubmitFlip(g_video, 0, FLIP_MODE_VSYNC, 0);
+    if (sceVideoOutSubmitFlip(g_video, 0, FLIP_MODE_VSYNC, 0) == 0) g_submitted++;
+    wait_flip_done();
     g_cur = 1;
 
     // --- controle ---
@@ -170,19 +207,16 @@ bool init(int width, int height) {
 uint32_t* back_buffer() { return g_buf[g_cur]; }
 
 void present() {
-    // espera o flip anterior terminar (no maximo ~50 ms)
-    for (int i = 0; i < 50; ++i) {
-        memset(g_flip_status, 0, sizeof(g_flip_status));
-        if (sceVideoOutGetFlipStatus(g_video, g_flip_status) != 0) break;
-        int32_t pending = *(int32_t*)(g_flip_status + 44);  // flipPendingNum
-        if (pending <= 0 || pending > 16) break;
-        sceKernelUsleep(1000);
-    }
     int r = -1;
-    for (int tries = 0; tries < 50 && r != 0; ++tries) {
+    for (int tries = 0; tries < 200 && r != 0; ++tries) {
         r = sceVideoOutSubmitFlip(g_video, g_cur, FLIP_MODE_VSYNC, 0);
         if (r != 0) sceKernelUsleep(1000);
     }
+    if (r == 0) g_submitted++;
+    // O buffer g_cur vai para a tela no proximo vsync. O OUTRO buffer ainda esta na tela ate o flip
+    // acontecer, entao so liberamos ele para desenho depois que o flip terminar.
+    wait_flip_done();
+    g_present_calls++;
     g_cur ^= 1;
 }
 

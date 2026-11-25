@@ -80,6 +80,7 @@ pkg.gp4: $(PKG_FILES)
 
 $(CONTENT_ID).pkg: pkg.gp4
 > bash ../ci/build_pkg.sh pkg.gp4 .
+> mv -f eboot.bin build/eboot.bin
 
 clean:
 > rm -rf build eboot.bin pkg.gp4 sce_sys/param.sfo *.pkg

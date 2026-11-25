@@ -2,7 +2,7 @@ name: "2 - Compilar PS4 (PKG)"
 
 # Roda sozinho quando o workflow 1 termina, quando voce muda algo em ps4/ (push),
 # ou manualmente (Actions > "2 - Compilar PS4 (PKG)" > Run workflow).
-# Resultado: artefato "fnafworld-ps4-pkg" com o .pkg e o eboot.bin.
+# Resultado: artefato "fnafworld-ps4-pkg" com SO o .pkg.
 
 on:
   workflow_dispatch:
@@ -148,9 +148,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: fnafworld-ps4-pkg
-          path: |
-            ps4/*.pkg
-            ps4/eboot.bin
+          path: ps4/*.pkg
           retention-days: 30
 
       - name: Guardar os logs de build
