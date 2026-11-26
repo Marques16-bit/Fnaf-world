@@ -34,10 +34,10 @@ from PIL import Image, ImageDraw, ImageFont
 IMG_EXT = {".png", ".bmp", ".jpg", ".jpeg", ".tga", ".gif"}
 DEFAULT_HOTSPOTS = """# x y w h botao rotulo   (coordenadas no espaco da janela do jogo, ex.: 1280x720)
 # botoes: cross (X), circle (Circulo), square (Quadrado), triangle (Triangulo)
- 80 560 250 90 cross Jogar
-360 560 250 90 circle Voltar
-640 560 250 90 square Extras
-920 560 250 90 triangle Opcoes
+ 80 500 250 90 cross Jogar
+360 500 250 90 circle Voltar
+640 500 250 90 square Extras
+920 500 250 90 triangle Opcoes
 """
 
 

@@ -12,6 +12,7 @@ Codigo de saida 1 se nao achar nada.
 """
 import argparse
 import glob
+import json
 import os
 import shutil
 import subprocess
@@ -70,6 +71,84 @@ def download(url, dest):
                            "(Google Drive/Mega normalmente nao funcionam; prefira a opcao Release do GitHub).")
 
 
+def gh(args):
+    try:
+        return subprocess.run(["gh"] + args, capture_output=True, text=True)
+    except FileNotFoundError:
+        return None
+
+
+def list_releases(repo):
+    """Lista as releases PUBLICADAS que o token enxerga (rascunhos/drafts nao aparecem)."""
+    r = gh(["api", "repos/%s/releases?per_page=30" % repo])
+    if r is None:
+        log("gh CLI nao encontrado")
+        return None
+    if r.returncode != 0:
+        log("nao consegui listar as releases:", (r.stderr or r.stdout).strip()[:300])
+        return None
+    try:
+        return json.loads(r.stdout)
+    except Exception as e:
+        log("resposta inesperada ao listar releases:", repr(e))
+        return None
+
+
+def pick_asset(assets):
+    """Escolhe o melhor anexo: .exe (de preferencia com fnaf/world no nome), senao .zip."""
+    def score(a):
+        n = a["name"].lower()
+        s = a.get("size", 0)
+        if "fnaf" in n or "world" in n:
+            s += 10 ** 12
+        return s
+    for ext in (".exe", ".zip"):
+        c = [a for a in assets if a["name"].lower().endswith(ext)]
+        if c:
+            return sorted(c, key=score, reverse=True)[0]
+    return None
+
+
+def from_releases(repo, tag, out_dir):
+    rels = list_releases(repo)
+    if rels is None:
+        return None
+    if not rels:
+        log("Este repositorio NAO tem nenhuma release PUBLICADA. (Rascunho/'draft' nao conta: clique em 'Publish release'.)")
+        return None
+    log("Releases visiveis neste repositorio:")
+    for r in rels:
+        names = ", ".join("%s (%.1f MB)" % (a["name"], a.get("size", 0) / 1048576.0) for a in r.get("assets", [])) or "(sem anexos)"
+        log("  - tag '%s'%s: %s" % (r.get("tag_name"), " [pre-release]" if r.get("prerelease") else "", names))
+    ordered = [r for r in rels if r.get("tag_name") == tag] + [r for r in rels if r.get("tag_name") != tag]
+    if not any(r.get("tag_name") == tag for r in rels):
+        log("AVISO: nao existe release publicada com a tag '%s'; vou procurar um .exe/.zip nas outras." % tag)
+    rel_dir = os.path.join(out_dir, "release")
+    shutil.rmtree(rel_dir, ignore_errors=True)
+    os.makedirs(rel_dir)
+    for r in ordered:
+        asset = pick_asset(r.get("assets", []))
+        if not asset:
+            continue
+        log("baixando '%s' da release '%s' ..." % (asset["name"], r.get("tag_name")))
+        res = gh(["release", "download", r["tag_name"], "-R", repo, "-D", rel_dir, "--pattern", asset["name"], "--clobber"])
+        if res is None or res.returncode != 0:
+            log("falhou:", ((res.stderr or res.stdout) if res else "gh ausente").strip()[:300])
+            continue
+        path = os.path.join(rel_dir, asset["name"])
+        if not os.path.exists(path):
+            found = glob.glob(os.path.join(rel_dir, "*"))
+            path = found[0] if found else None
+        if not path:
+            continue
+        exe = unzip_if_needed(path, out_dir) if path.lower().endswith(".zip") else path
+        if exe:
+            log("achei:", exe)
+            return exe
+    log("Nenhuma release tem um .exe ou .zip anexado (so esses formatos sao aceitos).")
+    return None
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="work/input")
@@ -96,30 +175,13 @@ def main():
             log("achei no repositorio:", exe)
 
     if not exe and args.repo:
-        rel_dir = os.path.join(args.out, "release")
-        shutil.rmtree(rel_dir, ignore_errors=True)
-        os.makedirs(rel_dir)
-        for pattern in ("*.exe", "*.zip"):
-            cmd = ["gh", "release", "download", args.tag, "-R", args.repo, "-D", rel_dir, "--pattern", pattern, "--clobber"]
-            log("rodando:", " ".join(cmd))
-            try:
-                r = subprocess.run(cmd, capture_output=True, text=True)
-                if r.returncode != 0:
-                    log("gh (", pattern, ") ->", (r.stderr or r.stdout).strip()[:300])
-            except FileNotFoundError:
-                log("gh CLI nao encontrado")
-                break
-            files = glob.glob(os.path.join(rel_dir, pattern))
-            if files:
-                files.sort(key=os.path.getsize, reverse=True)
-                exe = unzip_if_needed(files[0], args.out) if pattern == "*.zip" else files[0]
-                if exe:
-                    log("achei na release:", exe)
-                    break
+        exe = from_releases(args.repo, args.tag, args.out)
 
     if not exe or not os.path.exists(exe):
-        log("NAO ENCONTREI o FNaFWorld.exe. Veja o README: coloque-o em uma Release com a tag '%s' "
-            "(Releases > Draft a new release) ou informe um link direto ao rodar o workflow." % args.tag)
+        log("NAO ENCONTREI o FNaFWorld.exe.")
+        log("Como resolver: no repositorio va em Releases > 'Draft a new release', escolha/crie a tag '%s', "
+            "anexe o FNaFWorld.exe (ou um .zip do jogo) e clique em 'Publish release' (NAO deixe como rascunho)." % args.tag)
+        log("Alternativa: rode o workflow de novo e cole um link DIRETO de download no campo exe_url.")
         return 1
 
     final = os.path.join(args.out, "game.exe")

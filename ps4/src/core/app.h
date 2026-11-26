@@ -35,6 +35,8 @@ struct App {
     int last_action_timer;
     uint32_t frame_no;
     bool pad_ok;
+    bool first_frame;   // forca o 1o desenho
+    bool redraw;        // algo mudou: precisa redesenhar e enviar um quadro novo
 
     // transformacao jogo -> tela
     float scale;
@@ -44,5 +46,6 @@ struct App {
 
 // Inicializa (aloca da arena, le arquivos, compoe a cena). Sempre deixa o app em estado desenhavel.
 void app_init(App* app, Arena* arena, int fbw, int fbh);
-void app_update(App* app, const plat::PadState* pad);
+// Atualiza o estado. Retorna true se a tela mudou e precisa ser redesenhada (senao o quadro anterior continua valendo).
+bool app_update(App* app, const plat::PadState* pad);
 void app_draw(App* app, Surface* fb);

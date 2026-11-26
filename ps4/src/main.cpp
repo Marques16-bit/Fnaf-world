@@ -25,10 +25,13 @@ int main(int argc, char** argv) {
     for (;;) {
         plat::PadState pad = {};
         plat::poll_pad(&pad);
-        app_update(&app, &pad);
-        Surface fb = surface_make(plat::back_buffer(), FB_W, FB_H);
-        app_draw(&app, &fb);
-        plat::present();
+        if (app_update(&app, &pad)) {
+            Surface fb = surface_make(plat::back_buffer(), FB_W, FB_H);
+            app_draw(&app, &fb);
+            plat::present();  // so envia quadro novo quando algo mudou: a imagem parada fica estavel
+        } else {
+            plat::sleep_ms(8);
+        }
     }
     return 0;
 }

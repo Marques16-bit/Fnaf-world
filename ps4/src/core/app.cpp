@@ -103,6 +103,7 @@ void app_init(App* a, Arena* arena, int fbw, int fbh) {
     a->fbh = fbh;
     a->overlay = true;
     a->scale = 1.0f;
+    a->first_frame = true;
 
     // Superficies principais. Se a memoria faltar, o app ainda desenha texto de erro direto no framebuffer.
     uint32_t* scene_px = (uint32_t*)arena_alloc(arena, (size_t)fbw * fbh * 4, 64);
@@ -161,6 +162,7 @@ static void trigger_hotspots(App* a, PadBtn b) {
             snprintf(a->last_action, sizeof(a->last_action), "Acionado: %s  (%s)", a->frame.hs[i].label,
                      padbtn_name_pt(b));
             a->last_action_timer = 120;
+            a->redraw = true;
             plat::log("[app] %s", a->last_action);
         }
     }
@@ -171,11 +173,14 @@ static void change_sel(App* a, int delta) {
     int n = a->man.nimg;
     a->sel = ((a->sel + delta) % n + n) % n;
     a->need_compose = true;
+    a->redraw = true;
 }
 
-void app_update(App* a, const plat::PadState* pad) {
+bool app_update(App* a, const plat::PadState* pad) {
     a->frame_no++;
+    bool was_pad_ok = a->pad_ok;
     a->pad_ok = pad && pad->connected;
+    if (a->pad_ok != was_pad_ok) a->redraw = true;
     uint32_t cur = pad ? pad->buttons : 0;
     uint32_t pressed = cur & ~a->prev_buttons;
 
@@ -189,18 +194,34 @@ void app_update(App* a, const plat::PadState* pad) {
     if (a->hold_right > 25 && (a->hold_right % 6) == 0) change_sel(a, 1);
     if (a->hold_left > 25 && (a->hold_left % 6) == 0) change_sel(a, -1);
 
-    if (pressed & plat::PAD_OPTIONS) a->overlay = !a->overlay;
+    if (pressed & plat::PAD_OPTIONS) {
+        a->overlay = !a->overlay;
+        a->redraw = true;
+    }
     if (pressed & plat::PAD_CROSS) trigger_hotspots(a, PADBTN_CROSS);
     if (pressed & plat::PAD_CIRCLE) trigger_hotspots(a, PADBTN_CIRCLE);
     if (pressed & plat::PAD_SQUARE) trigger_hotspots(a, PADBTN_SQUARE);
     if (pressed & plat::PAD_TRIANGLE) trigger_hotspots(a, PADBTN_TRIANGLE);
 
-    for (int i = 0; i < FRAME_MAX_HOTSPOTS; ++i)
-        if (a->flash[i] > 0) a->flash[i]--;
-    if (a->last_action_timer > 0) a->last_action_timer--;
+    // animacoes em andamento: continuam pedindo quadros ate acabar (inclusive o quadro final)
+    for (int i = 0; i < FRAME_MAX_HOTSPOTS; ++i) {
+        if (a->flash[i] > 0) {
+            a->flash[i]--;
+            a->redraw = true;
+        }
+    }
+    if (a->last_action_timer > 0) {
+        a->last_action_timer--;
+        a->redraw = true;
+    }
     a->prev_buttons = cur;
 
     if (a->need_compose && a->scene.px) compose_scene(a);
+
+    bool out = a->redraw || a->first_frame;
+    a->redraw = false;
+    a->first_frame = false;
+    return out;
 }
 
 static void draw_overlay(App* a, Surface* fb) {
@@ -232,13 +253,18 @@ static void draw_overlay(App* a, Surface* fb) {
     }
 }
 
+// Margem de seguranca: muitas TVs cortam as bordas da imagem (overscan).
+#define SAFE_X 90
+#define SAFE_Y 54
+
 static void draw_hud(App* a, Surface* fb) {
     char line[256];
     int pad = 14;
     int lh = text_height(1) + 2;
     int lines = 4;
-    surf_fill_rect(fb, 12, 12, 980, lines * lh + 2 * pad, 0xB0000000u);
-    int x = 12 + pad, y = 12 + pad;
+    int bx = SAFE_X, by = SAFE_Y;
+    surf_fill_rect(fb, bx, by, 980, lines * lh + 2 * pad, 0xB0000000u);
+    int x = bx + pad, y = by + pad;
 
     text_draw(fb, x, y, "FNaF World PS4 - Etapa 1 (leitor básico)", COL_TEXT, 1);
     y += lh;
@@ -253,8 +279,8 @@ static void draw_hud(App* a, Surface* fb) {
         if (a->man.placeholder)
             text_draw(fb, x, y, "ASSETS NÃO EXTRAÍDOS - modo de teste (veja o relatório do GitHub Actions)", COL_WARN, 1);
         else {
-            snprintf(line, sizeof(line), "Overlay: %s   Controle: %s   Quadro: %u", a->overlay ? "LIGADO" : "desligado",
-                     a->pad_ok ? "OK" : "não detectado", (unsigned)a->frame_no);
+            snprintf(line, sizeof(line), "Overlay: %s   Controle: %s", a->overlay ? "LIGADO" : "desligado",
+                     a->pad_ok ? "OK" : "não detectado");
             text_draw(fb, x, y, line, a->pad_ok ? COL_OK : COL_WARN, 1);
         }
     } else {
@@ -263,20 +289,21 @@ static void draw_hud(App* a, Surface* fb) {
         text_draw(fb, x, y, a->status, COL_WARN, 1);
     }
 
-    // barra de dicas
+    // barra de dicas (dentro da area segura)
     const char* hint = "D-pad < > ou L1/R1: trocar imagem    OPTIONS: overlay    X / O / [] / ^ : acionar áreas";
     int hh = text_height(1) + 16;
-    surf_fill_rect(fb, 0, fb->h - hh, fb->w, hh, 0xC0000000u);
-    text_draw(fb, 24, fb->h - hh + 8, hint, COL_DIM, 1);
+    int hy = fb->h - SAFE_Y - hh;
+    surf_fill_rect(fb, SAFE_X - 10, hy, fb->w - 2 * (SAFE_X - 10), hh, 0xC0000000u);
+    text_draw(fb, SAFE_X + 6, hy + 8, hint, COL_DIM, 1);
 
     if (a->last_action_timer > 0) {
         int tw = text_width(a->last_action, 2);
-        int tx = fb->w - tw - 40, ty = 28;
+        int tx = fb->w - SAFE_X - tw - 16, ty = SAFE_Y + 8;
         surf_fill_rect(fb, tx - 16, ty - 8, tw + 32, text_height(2) + 16, 0xC0101830u);
         text_draw(fb, tx, ty, a->last_action, COL_OK, 2);
     }
     if (a->status[0] && a->man_ok) {
-        text_draw_shadow(fb, 24, fb->h - hh - text_height(1) - 8, a->status, COL_ERR, 1);
+        text_draw_shadow(fb, SAFE_X + 6, hy - text_height(1) - 8, a->status, COL_ERR, 1);
     }
 }
 

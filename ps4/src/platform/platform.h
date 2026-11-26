@@ -48,5 +48,7 @@ const char* asset_root();
 void log(const char* fmt, ...);
 // Milissegundos desde o inicio.
 uint64_t ticks_ms();
+// Dorme (usado quando nao ha nada para redesenhar).
+void sleep_ms(int ms);
 
 }  // namespace plat

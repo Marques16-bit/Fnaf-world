@@ -29,7 +29,8 @@ Veja também `COMO_INSTALAR.md` para colocar estes arquivos no repositório pelo
 2. **Teste o pipeline do PS4 primeiro (sem o jogo):** aba **Actions → "2 - Compilar PS4 (PKG)" → Run workflow**.
    Sem assets extraídos, ele usa uma imagem de teste ("modo de teste"). Se isso gerar o `.pkg`, a parte de compilação está ok.
 3. **Suba o `FNaFWorld.exe`** (o GitHub limita upload pelo navegador a 25 MB, então use uma Release):
-   *Releases → Draft a new release* → tag **`assets`** → anexe o `FNaFWorld.exe` (ou um `.zip` com a pasta do jogo) → *Publish*.
+   *Releases → Draft a new release* → tag **`assets`** (digite e toque em *Create new tag*) → anexe o `FNaFWorld.exe`
+   (ou um `.zip` com a pasta do jogo) → **Publish release**. Atenção: *Save draft* (rascunho) **não funciona**, o workflow não enxerga rascunhos.
 4. **Extraia:** **Actions → "1 - Extrair assets (Windows)" → Run workflow.**
    (Opcional: em vez da Release, cole um link direto de download no campo `exe_url`.)
 5. Quando o workflow 1 terminar com sucesso, o **workflow 2 roda sozinho**. No fim da página do run há o artefato

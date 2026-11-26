@@ -50,4 +50,5 @@ void log(const char* fmt, ...) {
     va_end(ap);
 }
 uint64_t ticks_ms() { return g_ms; }
+void sleep_ms(int) {}
 }  // namespace plat
