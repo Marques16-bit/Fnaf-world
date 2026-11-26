@@ -2,6 +2,7 @@
 """Gera um resumo em Markdown para a pagina do run (GITHUB_STEP_SUMMARY), legivel no celular."""
 import json
 import os
+import re
 
 
 def read(path, limit=4000):
@@ -9,40 +10,61 @@ def read(path, limit=4000):
         return None
     with open(path, encoding="utf-8", errors="replace") as f:
         t = f.read()
-    return t if len(t) <= limit else t[:limit] + "\n... (cortado; veja o artefato 'relatorio-extracao')"
+    return t if len(t) <= limit else t[-limit:]
+
+
+def jload(path):
+    t = read(path, 10 ** 7)
+    if not t:
+        return None
+    try:
+        return json.loads(t)
+    except Exception:
+        return None
 
 
 def main():
-    print("## Extracao de assets do FNaF World\n")
-    rep = read("work/extract_report.json")
-    if rep:
-        try:
-            r = json.loads(rep)
-            print("- Imagens extraidas: **%s**  (%s)" % (r.get("images"), "OK" if r.get("ok") else "FALHOU/POUCAS"))
-            for a in r.get("attempts", []):
-                print("  - tentativa `%s %s` -> %s imagens (codigo %s)" % (a["tool"], a["params"], a["images"], a["exit"]))
-        except Exception:
-            print(rep)
-    else:
-        print("- A extracao nao chegou a rodar (veja o passo que falhou acima).")
+    rep = jload("work/extract_report.json")
+    pk = jload("work/relatorio/pack_report.txt")
 
-    pk = read("work/relatorio/pack_report.txt", 3000)
+    # ---------- veredito ----------
+    n_img = (rep or {}).get("images", 0)
+    placeholder = (pk or {}).get("placeholder", True)
+    ncand = len((pk or {}).get("candidatas", []))
+    if pk and not placeholder and ncand > 0:
+        print("## ✅ Extracao OK: %d imagens extraidas, %d candidatas vao para o PKG (%.1f MB)\n" % (
+            (pk or {}).get("imagens_encontradas", n_img), ncand, (pk or {}).get("tamanho_total_mb", 0)))
+    else:
+        print("## ❌ A extracao NAO funcionou: o PKG sairia so com a imagem de teste\n")
+
+    # ---------- causa provavel ----------
+    build = read("work/dotnet_build.log", 200000) or ""
+    if rep is None:
+        print("- O extrator nem chegou a rodar (falhou antes: veja o passo vermelho acima).")
+    elif rep.get("erro"):
+        print("- **Causa:** %s." % rep["erro"])
+        errs = [l.strip() for l in build.splitlines() if re.search(r"error\s+\w+\d+:|error CS|Build FAILED|erro", l, re.I)]
+        if errs:
+            print("\nPrimeiros erros da compilacao do CTFAK:\n```")
+            print("\n".join(errs[:12]))
+            print("```")
+    else:
+        print("- Imagens extraidas pelo CTFAK: **%s**" % n_img)
+        for a in rep.get("attempts", []):
+            print("  - `%s %s` -> %s imagens (codigo %s, %ss, %s arquivos novos)" % (
+                a["tool"], a["params"], a["images"], a["exit"], a.get("seconds", "?"), a.get("new_files", "?")))
     if pk:
-        try:
-            p = json.loads(pk)
-            print("- Janela do jogo detectada: **%sx%s**" % tuple(p["janela"]))
-            print("- Candidatas de titulo no pacote do PS4: **%d**  (%.1f MB)%s" % (
-                len(p["candidatas"]), p["tamanho_total_mb"], "  ⚠️ MODO DE TESTE (sem assets reais)" if p["placeholder"] else ""))
-        except Exception:
-            pass
+        print("- Janela do jogo: **%sx%s**" % tuple(pk["janela"]))
+        if pk.get("tamanhos_mais_comuns"):
+            print("- Tamanhos de imagem mais comuns: " + ", ".join("%s (x%d)" % (t["tamanho"], t["qtd"]) for t in pk["tamanhos_mais_comuns"][:6]))
 
     insp = read("work/inspect.txt", 2500)
     if insp:
         print("\n### Versao do Clickteam no .exe\n```\n%s\n```" % insp)
     log = read("work/extract_log.txt", 3500)
     if log:
-        print("\n### Log do extrator\n```\n%s\n```" % log[-3500:])
-    print("\nAs miniaturas (folhas de contato) estao no artefato **relatorio-extracao**.")
+        print("\n### Final do log do extrator\n```\n%s\n```" % log)
+    print("\nArtefato **relatorio-extracao**: log completo, saida de cada tentativa do CTFAK (`ctfak_tentativa_N.txt`) e miniaturas.")
 
 
 if __name__ == "__main__":

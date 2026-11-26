@@ -58,6 +58,9 @@ e o nome original do arquivo vem logo abaixo). Me mande esse número/nome e a fo
   Os artefatos `relatorio-extracao` (workflow 1) e `logs-build-ps4` (workflow 2) têm os logs completos.
 - **O app abre mas a tela fica preta/travada:** foto da TV. O app também grava `/data/fnafworld/log.txt` no PS4
   (acessível por FTP) com cada passo da inicialização.
+- **PKG pequeno (~5 MB) = sem conteúdo do jogo.** Abra o run do workflow 1: o topo da página diz ✅ ou ❌ e a causa
+  (o CTFAK não compilou? rodou e não gerou imagens? gerou mas nenhuma serviu?). O log do passo "Gerar o PKG" do workflow 2
+  também mostra quantos arquivos de assets entram no PKG.
 - **Poucas/nenhuma imagem extraída:** o relatório mostra a versão/build do Clickteam do seu `.exe` (`inspect.txt`) e as
   tentativas do extrator. Com isso eu ajusto o extrator.
 

@@ -205,8 +205,7 @@ def pick_candidates(images, window, prefer, limit):
         if d["w"] == W and d["h"] == H:
             add(d)
     if len(chosen) < limit:
-        rest = [d for d in images if d["w"] * d["h"] >= 0.5 * W * H]
-        rest.sort(key=lambda d: -d["w"] * d["h"])
+        rest = sorted(images, key=lambda d: -d["w"] * d["h"])  # as maiores primeiro, de qualquer tamanho
         for d in rest:
             add(d)
     return chosen
@@ -307,6 +306,9 @@ def main():
 
     placeholder = not images
     window = cfg["window"] or (detect_window(images) if images else (1280, 720))
+    if window[0] > 2048 or window[1] > 1152:  # o leitor trabalha com imagens de ate 2048x1152
+        k = min(2048.0 / window[0], 1152.0 / window[1])
+        window = (int(window[0] * k), int(window[1] * k))
     print("[pack] janela do jogo:", window)
 
     # limpa a saida anterior
@@ -334,9 +336,9 @@ def main():
             except Exception as e:
                 print("[pack] pulei (erro ao abrir):", d["rel"], e)
                 continue
-            if im.width > 2048 or im.height > 1152:
-                print("[pack] pulei (grande demais p/ o leitor):", d["rel"])
-                continue
+            max_w, max_h = min(window[0], 2048), min(window[1], 1152)
+            if im.width > max_w or im.height > max_h:
+                im.thumbnail((max_w, max_h), Image.LANCZOS)  # reduz mantendo a proporcao
             hsh = hashlib.md5(im.tobytes()).hexdigest()
             if hsh in seen_hash:
                 continue  # imagem duplicada
@@ -384,8 +386,11 @@ def main():
                            args.report, "contato_candidatas")
             big = sorted(images, key=lambda d: -d["w"] * d["h"])[:100]
             contact_sheets([("%dx%d" % (d["w"], d["h"]), d["path"]) for d in big], args.report, "contato_maiores", per_sheet=20)
+        sizes = Counter((d["w"], d["h"]) for d in images)
         summary = {
             "imagens_encontradas": len(images),
+            "tamanhos_mais_comuns": [{"tamanho": "%dx%d" % k, "qtd": v} for k, v in sizes.most_common(10)],
+            "maiores": ["%dx%d" % (d["w"], d["h"]) for d in sorted(images, key=lambda d: -d["w"] * d["h"])[:5]],
             "janela": window,
             "placeholder": placeholder,
             "candidatas": [{"indice": i, "fwi": e[0], "w": e[1], "h": e[2], "origem": e[3]} for i, e in enumerate(entries)],
@@ -393,6 +398,14 @@ def main():
         }
         with open(os.path.join(args.report, "pack_report.txt"), "w", encoding="utf-8") as f:
             f.write(json.dumps(summary, indent=2, ensure_ascii=False))
+
+    if args.dump and not args.placeholder and placeholder:
+        if images:
+            print("[pack] ERRO: %d imagens foram extraidas, mas nenhuma serviu como candidata (veja 'tamanhos_mais_comuns' no relatorio)." % len(images))
+        else:
+            print("[pack] ERRO: NENHUMA imagem foi extraida do .exe. Foi gerada so a imagem de teste (placeholder).")
+        print("[pack]       Veja o resumo no topo da pagina do run e o artefato 'relatorio-extracao' (extract_log.txt).")
+        return 3  # deixa o workflow VERMELHO para voce perceber que a extracao nao funcionou
     return 0
 
 

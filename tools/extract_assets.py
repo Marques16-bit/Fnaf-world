@@ -30,14 +30,17 @@ import zipfile
 REQUIREMENTS_URL = "https://github.com/CTFAK/.github/raw/main/ctfakrequirements.zip"
 IMG_EXT = (".png", ".bmp", ".jpg", ".jpeg", ".tga")
 
-# (ferramenta, parametros extras)  -> tentadas em ordem ate sair um bom numero de imagens
+# (ferramenta, parametros do CTFAK)  -> tentadas em ordem ate sair um bom numero de imagens.
+# Parametros documentados no README do CTFAK 2.0: onlyimages, noevnt, nosounds, noalpha ...
 ATTEMPTS = [
-    ("Image Dumper", ""),
     ("Image Dumper", "-onlyimages"),
-    ("Dump Everything", "-nosounds"),
-    ("Sorted Image Dumper", ""),
+    ("Image Dumper", "-noevnt -nosounds"),
+    ("Image Dumper", ""),
+    ("Dump Everything", "-noevnt -nosounds"),
+    ("Sorted Image Dumper", "-noevnt -nosounds"),
 ]
 MIN_IMAGES = 10
+TOTAL_BUDGET_S = 75 * 60  # orcamento total de tempo para todas as tentativas
 
 _LOG = []
 
@@ -130,19 +133,46 @@ def list_images(root):
     return out
 
 
-def snapshot_images(roots):
-    s = set()
+def snapshot_files(roots):
+    """{caminho: tamanho} de TODOS os arquivos sob as pastas (para descobrir onde o CTFAK gravou)."""
+    snap = {}
     for r in roots:
-        s.update(list_images(r))
-    return s
+        if not os.path.isdir(r):
+            continue
+        for dp, dn, fn in os.walk(r):
+            dn[:] = [d for d in dn if d not in (".git", "dump", "relatorio")]
+            for f in fn:
+                p = os.path.join(dp, f)
+                try:
+                    snap[p] = os.path.getsize(p)
+                except OSError:
+                    pass
+    return snap
 
 
-def run_cli(cli, exe, tool, params, cwd, timeout_s):
+def describe_new(new_files):
+    """Resumo legivel dos arquivos novos: por extensao e os primeiros caminhos."""
+    by_ext = {}
+    for p, sz in new_files.items():
+        e = os.path.splitext(p)[1].lower() or "(sem extensao)"
+        c = by_ext.setdefault(e, [0, 0])
+        c[0] += 1
+        c[1] += sz
+    log("arquivos NOVOS criados pelo CTFAK: %d" % len(new_files))
+    for e, (n, sz) in sorted(by_ext.items(), key=lambda kv: -kv[1][0])[:12]:
+        log("   %-14s %6d arquivos  %8.1f MB" % (e, n, sz / 1048576.0))
+    for p in sorted(new_files)[:25]:
+        log("   + " + p)
+
+
+def run_cli(cli, exe, tool, params, cwd, timeout_s, out_file):
     cmd = [cli, "-path", exe, "-tool", tool, "-closeonfinish"]
     if params:
         cmd[3:3] = ["-parameters", params]
     log("executando:", " ".join('"%s"' % c if " " in c else c for c in cmd))
     t0 = time.time()
+    out = ""
+    code = -1
     try:
         p = subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT, text=True, errors="replace")
@@ -155,11 +185,17 @@ def run_cli(cli, exe, tool, params, cwd, timeout_s):
         code = p.returncode
     except Exception as e:
         log("ERRO ao executar o CLI:", repr(e))
-        return -1, ""
-    log("codigo de saida: %s  (%.0f s)" % (code, time.time() - t0))
-    tail = "\n".join((out or "").splitlines()[-40:])
+        out = "ERRO ao executar: %r" % (e,)
+    dt = time.time() - t0
+    log("codigo de saida: %s  (%.0f s)" % (code, dt))
+    try:
+        with open(out_file, "w", encoding="utf-8", errors="replace") as f:
+            f.write("$ " + " ".join(cmd) + "\n\n" + (out or ""))
+    except Exception:
+        pass
+    tail = "\n".join((out or "").splitlines()[-30:])
     log("---- ultimas linhas do CTFAK ----\n" + tail + "\n---------------------------------")
-    return code, out or ""
+    return code, out or "", dt
 
 
 def main():
@@ -168,26 +204,33 @@ def main():
     ap.add_argument("--ctfak-src", default="_ctfak")
     ap.add_argument("--work", default="work")
     ap.add_argument("--dump-out", default="work/dump")
-    ap.add_argument("--timeout-min", type=int, default=30)
+    ap.add_argument("--timeout-min", type=int, default=30, help="limite de cada tentativa")
     args = ap.parse_args()
 
     os.makedirs(args.work, exist_ok=True)
+    report_dir = os.path.join(args.work, "relatorio")  # essa pasta vai no artefato 'relatorio-extracao'
+    os.makedirs(report_dir, exist_ok=True)
     report = {"ok": False, "images": 0, "attempts": [], "cli": None}
 
     def finish(code):
-        with open(os.path.join(args.work, "extract_log.txt"), "w", encoding="utf-8") as f:
-            f.write("\n".join(_LOG) + "\n")
-        with open(os.path.join(args.work, "extract_report.json"), "w", encoding="utf-8") as f:
-            json.dump(report, f, indent=2, ensure_ascii=False)
+        for dst in (os.path.join(args.work, "extract_log.txt"), os.path.join(report_dir, "extract_log.txt")):
+            with open(dst, "w", encoding="utf-8") as f:
+                f.write("\n".join(_LOG) + "\n")
+        for dst in (os.path.join(args.work, "extract_report.json"), os.path.join(report_dir, "extract_report.json")):
+            with open(dst, "w", encoding="utf-8") as f:
+                json.dump(report, f, indent=2, ensure_ascii=False)
         return code
 
     if not os.path.exists(args.exe):
         log("ERRO: exe nao encontrado:", args.exe)
         return finish(1)
+    log("exe: %s (%.1f MB)" % (args.exe, os.path.getsize(args.exe) / 1048576.0))
 
     cli = find_cli(args.ctfak_src)
     if not cli:
         log("ERRO: CTFAK.Cli.exe nao foi encontrado em", args.ctfak_src, "- o 'dotnet build' provavelmente falhou.")
+        log("      (veja work/dotnet_build.log no artefato 'relatorio-extracao')")
+        report["erro"] = "CLI do CTFAK nao compilou"
         return finish(1)
     cli_dir = os.path.dirname(os.path.abspath(cli))
     report["cli"] = cli
@@ -197,27 +240,36 @@ def main():
     fetch_requirements(cli_dir)
 
     exe_abs = os.path.abspath(args.exe)
-    timeout_s = args.timeout_min * 60
-    watch = [os.path.join(cli_dir, "Dumps"), os.path.join(os.getcwd(), "Dumps"), os.path.join(args.work, "Dumps")]
+    roots = [cli_dir, os.path.join(os.getcwd(), "Dumps"), args.work]
     best = []
+    t_start = time.time()
 
-    for tool, params in ATTEMPTS:
-        before = snapshot_images(watch)
-        code, _out = run_cli(os.path.abspath(cli), exe_abs, tool, params, cli_dir, timeout_s)
-        after = snapshot_images(watch)
-        new = sorted(after - before) or sorted(after)
-        report["attempts"].append({"tool": tool, "params": params, "exit": code, "images": len(new)})
-        log("tentativa '%s' %s -> %d imagens" % (tool, params, len(new)))
-        if len(new) > len(best):
-            best = new
-        if len(new) >= MIN_IMAGES:
+    for i, (tool, params) in enumerate(ATTEMPTS, 1):
+        left = TOTAL_BUDGET_S - (time.time() - t_start)
+        if left < 120:
+            log("orcamento de tempo esgotado; parando as tentativas")
+            break
+        before = snapshot_files(roots)
+        out_file = os.path.join(report_dir, "ctfak_tentativa_%d.txt" % i)
+        timeout_s = int(min(args.timeout_min * 60, left))
+        code, _out, dt = run_cli(os.path.abspath(cli), exe_abs, tool, params, cli_dir, timeout_s, out_file)
+        after = snapshot_files(roots)
+        new_files = {p: sz for p, sz in after.items() if p not in before or before[p] != sz}
+        describe_new(new_files)
+        imgs = sorted(p for p in new_files if p.lower().endswith(IMG_EXT) and os.path.getsize(p) > 0)
+        report["attempts"].append({"tool": tool, "params": params, "exit": code, "images": len(imgs),
+                                   "new_files": len(new_files), "seconds": round(dt)})
+        log("tentativa %d '%s' %s -> %d imagens" % (i, tool, params, len(imgs)))
+        if len(imgs) > len(best):
+            best = imgs
+        if len(imgs) >= MIN_IMAGES:
             break
 
     # copia as imagens para --dump-out preservando a estrutura relativa
     shutil.rmtree(args.dump_out, ignore_errors=True)
     os.makedirs(args.dump_out, exist_ok=True)
     for p in best:
-        root = next((w for w in watch if p.startswith(w)), os.path.dirname(p))
+        root = next((w for w in roots if p.startswith(w)), os.path.dirname(p))
         rel = os.path.relpath(p, root)
         dst = os.path.join(args.dump_out, rel)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
